@@ -190,44 +190,42 @@ async def on_message(new_msg):
     try:
         async with new_msg.channel.typing():
             async for curr_chunk in await openai_client.chat.completions.create(**kwargs):
-                # Only proceed if we have a previous chunk to work with
-                if prev_chunk:
-                    # Safely handle missing 'delta' or 'content' in the current and previous chunks
-                    prev_content = prev_chunk.choices[0].delta.get('content', '') if prev_chunk.choices[0].delta else ""
-                    curr_content = curr_chunk.choices[0].delta.get('content', '') if curr_chunk.choices[0].delta else ""
+                # Safely handle missing 'delta' or 'content' in the current and previous chunks
+                prev_content = getattr(prev_chunk.choices[0].delta, 'content', '') if prev_chunk and prev_chunk.choices[0].delta else ""
+                curr_content = getattr(curr_chunk.choices[0].delta, 'content', '') if curr_chunk.choices[0].delta else ""
             
-                    # Ensure we append the content if it exists
-                    if response_contents or prev_content:
-                        # Split content into multiple messages if necessary
-                        if not response_contents or len(response_contents[-1] + prev_content) > MAX_MESSAGE_LENGTH:
-                            response_contents.append("")
-            
-                            if not USE_PLAIN_RESPONSES:
-                                # Create and send embed response
-                                reply_to_msg = new_msg if not response_msgs else response_msgs[-1]
-                                embed = discord.Embed(description=(prev_content + STREAMING_INDICATOR), color=EMBED_COLOR_INCOMPLETE)
-                                for warning in sorted(user_warnings):
-                                    embed.add_field(name=warning, value="", inline=False)
-                                response_msg = await reply_to_msg.reply(embed=embed, silent=True)
-                                msg_nodes[response_msg.id] = MsgNode(next_msg=new_msg)
-                                await msg_nodes[response_msg.id].lock.acquire()
-                                last_task_time = dt.now().timestamp()
-                                response_msgs.append(response_msg)
-            
-                        # Append content to the last message chunk
-                        response_contents[-1] += prev_content
+                # Ensure we append the content if it exists
+                if response_contents or prev_content:
+                    # Split content into multiple messages if necessary
+                    if not response_contents or len(response_contents[-1] + prev_content) > MAX_MESSAGE_LENGTH:
+                        response_contents.append("")
             
                         if not USE_PLAIN_RESPONSES:
-                            msg_split_incoming = len(response_contents[-1] + curr_content) > MAX_MESSAGE_LENGTH
-                            is_final_edit = msg_split_incoming or (finish_reason := curr_chunk.choices[0].finish_reason) is not None
+                            # Create and send embed response
+                            reply_to_msg = new_msg if not response_msgs else response_msgs[-1]
+                            embed = discord.Embed(description=(prev_content + STREAMING_INDICATOR), color=EMBED_COLOR_INCOMPLETE)
+                            for warning in sorted(user_warnings):
+                                embed.add_field(name=warning, value="", inline=False)
+                            response_msg = await reply_to_msg.reply(embed=embed, silent=True)
+                            msg_nodes[response_msg.id] = MsgNode(next_msg=new_msg)
+                            await msg_nodes[response_msg.id].lock.acquire()
+                            last_task_time = dt.now().timestamp()
+                            response_msgs.append(response_msg)
             
-                            if is_final_edit or ((not edit_task or edit_task.done()) and dt.now().timestamp() - last_task_time >= EDIT_DELAY_SECONDS):
-                                while edit_task and not edit_task.done():
-                                    await asyncio.sleep(0)
-                                embed.description = response_contents[-1] if is_final_edit else (response_contents[-1] + STREAMING_INDICATOR)
-                                embed.color = EMBED_COLOR_COMPLETE if msg_split_incoming or finish_reason == "stop" else EMBED_COLOR_INCOMPLETE
-                                edit_task = asyncio.create_task(response_msgs[-1].edit(embed=embed))
-                                last_task_time = dt.now().timestamp()
+                    # Append content to the last message chunk
+                    response_contents[-1] += prev_content
+            
+                    if not USE_PLAIN_RESPONSES:
+                        msg_split_incoming = len(response_contents[-1] + curr_content) > MAX_MESSAGE_LENGTH
+                        is_final_edit = msg_split_incoming or (finish_reason := curr_chunk.choices[0].finish_reason) is not None
+            
+                        if is_final_edit or ((not edit_task or edit_task.done()) and dt.now().timestamp() - last_task_time >= EDIT_DELAY_SECONDS):
+                            while edit_task and not edit_task.done():
+                                await asyncio.sleep(0)
+                            embed.description = response_contents[-1] if is_final_edit else (response_contents[-1] + STREAMING_INDICATOR)
+                            embed.color = EMBED_COLOR_COMPLETE if msg_split_incoming or finish_reason == "stop" else EMBED_COLOR_INCOMPLETE
+                            edit_task = asyncio.create_task(response_msgs[-1].edit(embed=embed))
+                            last_task_time = dt.now().timestamp()
             
                 # Move to the next chunk
                 prev_chunk = curr_chunk
