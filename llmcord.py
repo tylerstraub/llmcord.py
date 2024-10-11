@@ -107,7 +107,8 @@ async def on_message(new_msg):
             if not curr_node.data:
                 good_attachments = {type: [att for att in curr_msg.attachments if att.content_type and type in att.content_type] for type in ALLOWED_FILE_TYPES}
 
-                text = "\n".join(
+                # Prepend display name to message content
+                text = f"{curr_msg.author.display_name}: " + "\n".join(
                     ([curr_msg.content] if curr_msg.content else [])
                     + [embed.description for embed in curr_msg.embeds if embed.description]
                     + [requests.get(att.url).text for att in good_attachments["text"]]
